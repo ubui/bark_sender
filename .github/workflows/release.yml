@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    env:
+      # 跳过 playwright 浏览器下载：rollup-plugin-chrome-extension 的传递依赖
+      # playwright-chromium 会在 postinstall 拉浏览器，CI 用不到且新版 playwright
+      # 对部分 Ubuntu 版本识别会失败，直接跳过
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build extension
+        run: npm run build
+
+      - name: Resolve zip path
+        id: zip
+        run: echo "path=releases/bark_pusher-$(node -p "require('./package.json').version").zip" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.zip.outputs.path }}
+          generate_release_notes: true
