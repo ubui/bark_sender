@@ -55,12 +55,28 @@ export const pushContent = async (
   { text, url }: ContentToPush,
   target?: string,
   group?: string
-) => {
+): Promise<boolean> => {
   try {
-    // 没有写成 `if (!(target = target || await getStorage('defaultDevice')))`
+    // 推送链路只保留一轮存储往返：sync 六键一次批量读 + local 一次并行读
+    const [
+      { defaultDevice, rememberGroup, archiveOption, pushSound, isAutoCopy, shouldNotify },
+      currentGroup,
+    ] = await Promise.all([
+      syncStore.get([
+        'defaultDevice',
+        'rememberGroup',
+        'archiveOption',
+        'pushSound',
+        'isAutoCopy',
+        'shouldNotify',
+      ]),
+      localStore.get('currentGroup'),
+    ]);
+
+    // 没有写成 `if (!(target = target || defaultDevice))`
     // 是为了 target === '' 时能报错而非获取默认值
     if (target === undefined) {
-      target = await syncStore.get('defaultDevice');
+      target = defaultDevice;
     }
 
     if (!target) {
@@ -68,19 +84,14 @@ export const pushContent = async (
     }
 
     if (group === undefined) {
-      const shouldUseLastSelectedGroup = await syncStore.get('rememberGroup');
-      group = shouldUseLastSelectedGroup
-        ? (await localStore.get('currentGroup')) || EMPTY_GROUP
-        : EMPTY_GROUP;
+      group = rememberGroup ? currentGroup || EMPTY_GROUP : EMPTY_GROUP;
     }
 
     url = url || '';
-    const archiveOption = await syncStore.get('archiveOption');
-    const pushSound = await syncStore.get('pushSound');
 
     const paramsValidator: { [paramStr: string]: boolean } = {
       [`url=${encodeURIComponent(url)}`]: Boolean(url),
-      ['automaticallyCopy=1']: !url && (await syncStore.get('isAutoCopy')),
+      ['automaticallyCopy=1']: !url && isAutoCopy,
       ['isArchive=1']: archiveOption === 'always',
       ['isArchive=0']: archiveOption === 'never',
       [`sound=${pushSound}`]: Boolean(pushSound),
@@ -92,19 +103,26 @@ export const pushContent = async (
       .join('&');
     const paramStr = validParams ? `?${validParams}` : '';
 
-    const shouldNofity = await syncStore.get('shouldNotify');
-
-    fetch(`${target}${encodeURIComponent(text)}${paramStr}`).then((response) => {
-      if (response.ok && shouldNofity) {
-        chrome.notifications.create({
-          type: 'basic',
-          iconUrl: '/assets/icon.png',
-          title: '已推送至 Bark',
-          message: text,
-        });
-      }
-    });
+    // keepalive：点击发送后立刻切走页面导致 popup 关闭时，请求仍会完成，避免推送丢失
+    return fetch(`${target}${encodeURIComponent(text)}${paramStr}`, { keepalive: true })
+      .then((response) => {
+        if (response.ok && shouldNotify) {
+          chrome.notifications.create({
+            type: 'basic',
+            iconUrl: '/assets/icon.png',
+            title: '已推送至 Bark',
+            message: text,
+          });
+        }
+        return response.ok;
+      })
+      .catch((e) => {
+        console.error(e);
+        return false;
+      });
   } catch (e) {
-    alert(e);
+    // MV3 service worker 中没有 alert，且 popup 中 alert 会阻塞界面，统一改用 console
+    console.error(e);
+    return false;
   }
 };

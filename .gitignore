@@ -2,5 +2,8 @@
 node_modules
 package-lock.json
 
+# Bark iOS 客户端源码，仅作参考，不属于扩展产物，禁止提交和打包
+Bark/
+
 dist
 releases

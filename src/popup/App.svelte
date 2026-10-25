@@ -9,8 +9,13 @@
   let sendGroup = EMPTY_GROUP;
 
   type PushContent = typeof pushContent;
-  const pushMsg = (msg: Parameters<PushContent>[0]): ReturnType<PushContent> =>
-    pushContent(msg, sendTarget, sendGroup);
+  type SendStatus = '' | 'sending' | 'sent' | 'failed';
+  let sendStatus: SendStatus = '';
+  const pushMsg = async (msg: Parameters<PushContent>[0]) => {
+    sendStatus = 'sending';
+    const isPushed = await pushContent(msg, sendTarget, sendGroup);
+    sendStatus = isPushed ? 'sent' : 'failed';
+  };
 
   const sendCurPage = async () => {
     const [text, url] = await new Promise<[string | undefined, string | undefined]>((resolve) => {
@@ -46,13 +51,19 @@
   let msgGroups: string[] = [];
 
   onMount(async () => {
-    deviceList = await syncStore.get('deviceList');
-    sendTarget = (await localStore.get('currentSelect')) || deviceList[0]?.url || '';
+    // 初始数据并行读取：一次批量 sync + 两次并行 local，替代原来的 5 次串行等待
+    const [{ deviceList: devices, msgGroups: groups, rememberGroup }, currentSelect, currentGroup] =
+      await Promise.all([
+        syncStore.get(['deviceList', 'msgGroups', 'rememberGroup']),
+        localStore.get('currentSelect'),
+        localStore.get('currentGroup'),
+      ]);
 
-    msgGroups = [EMPTY_GROUP, ...(await syncStore.get('msgGroups'))];
-    sendGroup = (await syncStore.get('rememberGroup'))
-      ? (await localStore.get('currentGroup')) || EMPTY_GROUP
-      : EMPTY_GROUP;
+    deviceList = devices;
+    sendTarget = currentSelect || devices[0]?.url || '';
+
+    msgGroups = [EMPTY_GROUP, ...groups];
+    sendGroup = rememberGroup ? currentGroup || EMPTY_GROUP : EMPTY_GROUP;
   });
 </script>
 
@@ -94,6 +105,9 @@
     <button class="send-custom" on:click={sendCustomText}>发送</button>
   </div>
 </div>
+<div class="send-status" class:failed={sendStatus === 'failed'}>
+  {sendStatus === 'sending' ? '发送中…' : sendStatus === 'sent' ? '已发送' : sendStatus === 'failed' ? '发送失败' : ''}
+</div>
 <div class="footer">
   <a href="/options/index.html#fromPopup"><i class="iconfont icon-setup" />设置</a>
 </div>
@@ -102,6 +116,19 @@
   :global(body) {
     width: 350px;
     margin: 15px 10px 10px;
+  }
+
+  .send-status {
+    height: 18px;
+    margin-bottom: 4px;
+    color: #666666;
+    text-align: center;
+    font-size: 12px;
+    line-height: 18px;
+
+    &.failed {
+      color: #d92323;
+    }
   }
 
   button {

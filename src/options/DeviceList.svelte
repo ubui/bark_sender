@@ -7,8 +7,12 @@
   let deviceList: Device[] = [];
   let defaultDevice = '';
   const refreshDeviceList = async () => {
-    deviceList = await syncStore.get('deviceList');
-    defaultDevice = await syncStore.get('defaultDevice');
+    const { deviceList: list, defaultDevice: defaultUrl } = await syncStore.get([
+      'deviceList',
+      'defaultDevice',
+    ]);
+    deviceList = list;
+    defaultDevice = defaultUrl;
   };
 
   let editSource: Device | null = null;
